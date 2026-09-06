@@ -1,86 +1,551 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Opal Rewards — Scan Customer QR</title>
-    <style>
-      * { box-sizing: border-box; }
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: #111; color: #fff; margin: 0; padding: 20px;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        min-height: 100vh; text-align: center;
-      }
-      h1 { font-size: 16px; font-weight: 600; margin: 0 0 16px; color: #ddd; }
-      #qrReader { width: 100%; max-width: 320px; }
-      .message { margin-top: 16px; font-size: 14px; color: #ddd; max-width: 320px; }
-      .error { color: #ff8a80; }
-      button {
-        margin-top: 20px; padding: 14px 28px; background: #9c7c3c; color: #fff;
-        border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Opal Rewards — Scan Customer QR</h1>
-    <div id="qrReader"></div>
-    <div class="message" id="statusMessage">Starting camera…</div>
-    <button onclick="cancelScan()">CANCEL</button>
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/1.1.5/html5-qrcode.min.js"></script>
-    <script>
-      let html5QrCode = null;
-      let scanHandled = false;
+ <title>Opal Rewards — Scan Customer QR</title>
 
-      function setStatus(msg, isError) {
-        const el = document.getElementById('statusMessage');
-        el.textContent = msg;
-        el.className = 'message' + (isError ? ' error' : '');
-      }
+ <style>
+ * {
+ box-sizing: border-box;
+ }
 
-      function startScan() {
-        html5QrCode = new Html5Qrcode("qrReader");
-        html5QrCode.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: 220 },
-          onScanSuccess,
-          function() { /* fires continuously while nothing is found — ignored */ }
-        ).then(function() {
-          setStatus("Point the camera at the customer's QR code.");
-        }).catch(function() {
-          setStatus('Camera unavailable. Please close this window and use mobile number or customer token search on the Staff page instead.', true);
-        });
-      }
+ body {
+ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+ background: #111;
+ color: #fff;
+ margin: 0;
+ padding: 20px;
+ min-height: 100vh;
+ text-align: center;
+ }
 
-      function onScanSuccess(decodedText) {
-        if (scanHandled) return;
-        scanHandled = true;
+ h1 {
+ font-size: 18px;
+ margin: 20px 0;
+ color: #ddd;
+ }
 
-        if (html5QrCode) { html5QrCode.stop().catch(function() {}); }
-        setStatus('Scanned! Returning to Staff page…');
+ #qrReader {
+ width: 100%;
+ max-width: 360px;
+ margin: 0 auto;
+ }
 
-        if (window.opener) {
-          // Can't lock the target origin — Apps Script's sandboxed page has an
-          // opaque origin the scanner can't predict. Safe because: the decoded
-          // text isn't sensitive (it's the same content printed on the
-          // customer's own QR), and the Staff page independently verifies the
-          // SENDER's origin before trusting anything it receives.
-          window.opener.postMessage(decodedText, '*');
-        }
+ .status {
+ margin: 18px auto;
+ max-width: 360px;
+ font-size: 15px;
+ line-height: 1.5;
+ color: #ddd;
+ }
 
-        setTimeout(function() {
-          window.close();
-          setStatus('Done! You can close this window if it did not close automatically.');
-        }, 300);
-      }
+ .error {
+ color: #ff8a80;
+ }
 
-      function cancelScan() {
-        if (html5QrCode) { html5QrCode.stop().catch(function() {}); }
-        window.close();
-      }
+ .success {
+ color: #81c995;
+ }
 
-      startScan();
-    </script>
-  </body>
+ .diagnostics {
+ margin: 20px auto;
+ max-width: 360px;
+ padding: 15px;
+ background: #1e1e1e;
+ border-radius: 10px;
+ text-align: left;
+ font-size: 13px;
+ line-height: 1.7;
+ }
+
+ .diagnostics strong {
+ color: #ddd;
+ }
+
+ button {
+ margin-top: 15px;
+ padding: 14px 28px;
+ background: #9c7c3c;
+ color: #fff;
+ border: none;
+ border-radius: 10px;
+ font-size: 15px;
+ font-weight: 600;
+ cursor: pointer;
+ }
+
+ button:disabled {
+ opacity: 0.5;
+ }
+
+ #cameraSelect {
+ width: 100%;
+ max-width: 360px;
+ padding: 12px;
+ margin-top: 12px;
+ border-radius: 8px;
+ border: none;
+ font-size: 15px;
+ display: none;
+ }
+ </style>
+</head>
+
+<body>
+
+ <h1>Opal Rewards — Scan Customer QR</h1>
+
+ <div id="qrReader"></div>
+
+ <div id="statusMessage" class="status">
+ Checking camera...
+ </div>
+
+ <select id="cameraSelect">
+ <option value="">Select camera</option>
+ </select>
+
+ <button id="retryButton" onclick="startCamera()" style="display:none;">
+ TRY CAMERA AGAIN
+ </button>
+
+ <button onclick="cancelScan()">
+ CANCEL
+ </button>
+
+ <div class="diagnostics">
+ <strong>Camera diagnostics</strong><br>
+ HTTPS / Secure: <span id="secureStatus">checking...</span><br>
+ Camera API: <span id="apiStatus">checking...</span><br>
+ Scanner library: <span id="libraryStatus">checking...</span><br>
+ Camera devices: <span id="cameraStatus">checking...</span>
+ </div>
+
+ <!-- Current html5-qrcode release -->
+ <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+
+ <script>
+
+ let html5QrCode = null;
+ let scanHandled = false;
+ let cameras = [];
+
+ const statusMessage = document.getElementById("statusMessage");
+ const retryButton = document.getElementById("retryButton");
+ const cameraSelect = document.getElementById("cameraSelect");
+
+ function setStatus(message, type) {
+
+ statusMessage.textContent = message;
+
+ statusMessage.className = "status";
+
+ if (type === "error") {
+ statusMessage.classList.add("error");
+ }
+
+ if (type === "success") {
+ statusMessage.classList.add("success");
+ }
+ }
+
+
+ function updateDiagnostics() {
+
+ document.getElementById("secureStatus").textContent =
+ window.isSecureContext ? "YES" : "NO";
+
+ document.getElementById("apiStatus").textContent =
+ (navigator.mediaDevices &&
+ typeof navigator.mediaDevices.getUserMedia === "function")
+ ? "YES"
+ : "NO";
+
+ document.getElementById("libraryStatus").textContent =
+ (typeof Html5Qrcode !== "undefined")
+ ? "LOADED"
+ : "NOT LOADED";
+ }
+
+
+ async function getCameraList() {
+
+ try {
+
+ if (!navigator.mediaDevices ||
+ !navigator.mediaDevices.enumerateDevices) {
+
+ document.getElementById("cameraStatus").textContent =
+ "API unavailable";
+
+ return [];
+
+ }
+
+ const devices =
+ await navigator.mediaDevices.enumerateDevices();
+
+ cameras = devices.filter(function(device) {
+ return device.kind === "videoinput";
+ });
+
+ document.getElementById("cameraStatus").textContent =
+ cameras.length + " camera(s) found";
+
+ cameraSelect.innerHTML =
+ '<option value="">Select camera</option>';
+
+ cameras.forEach(function(camera, index) {
+
+ const option =
+ document.createElement("option");
+
+ option.value = camera.deviceId;
+
+ option.textContent =
+ camera.label ||
+ "Camera " + (index + 1);
+
+ cameraSelect.appendChild(option);
+
+ });
+
+ if (cameras.length > 0) {
+ cameraSelect.style.display = "block";
+ }
+
+ return cameras;
+
+ } catch (error) {
+
+ document.getElementById("cameraStatus").textContent =
+ "Could not list cameras";
+
+ console.error(error);
+
+ return [];
+
+ }
+ }
+
+
+ async function startCamera() {
+
+ retryButton.style.display = "none";
+
+ scanHandled = false;
+
+ updateDiagnostics();
+
+ if (!window.isSecureContext) {
+
+ setStatus(
+ "This page is not using HTTPS. Camera access requires HTTPS.",
+ "error"
+ );
+
+ retryButton.style.display = "inline-block";
+
+ return;
+ }
+
+
+ if (!navigator.mediaDevices ||
+ typeof navigator.mediaDevices.getUserMedia !== "function") {
+
+ setStatus(
+ "This browser does not provide camera access to this page.",
+ "error"
+ );
+
+ retryButton.style.display = "inline-block";
+
+ return;
+ }
+
+
+ if (typeof Html5Qrcode === "undefined") {
+
+ setStatus(
+ "QR scanner library failed to load.",
+ "error"
+ );
+
+ retryButton.style.display = "inline-block";
+
+ return;
+ }
+
+
+ setStatus("Requesting camera permission...");
+
+
+ try {
+
+ /*
+ * First attempt:
+ * Ask for the rear/environment camera.
+ */
+
+ html5QrCode = new Html5Qrcode("qrReader");
+
+
+ await html5QrCode.start(
+
+ { facingMode: "environment" },
+
+ {
+ fps: 10,
+ qrbox: {
+ width: 250,
+ height: 250
+ }
+ },
+
+ onScanSuccess,
+
+ function(errorMessage) {
+ // Normal scanning messages are intentionally ignored.
+ }
+
+ );
+
+
+ setStatus(
+ "Camera started. Point the rear camera at the customer's QR code.",
+ "success"
+ );
+
+
+ await getCameraList();
+
+
+ } catch (error) {
+
+ console.error(
+ "Camera start error:",
+ error
+ );
+
+
+ let errorName =
+ error && error.name
+ ? error.name
+ : "UnknownError";
+
+ let errorMessage =
+ error && error.message
+ ? error.message
+ : String(error);
+
+
+ /*
+ * If the first attempt failed,
+ * try to get the camera list.
+ */
+
+ const availableCameras =
+ await getCameraList();
+
+
+ /*
+ * If cameras are available,
+ * show them to the user.
+ */
+
+ if (availableCameras.length > 0) {
+
+ setStatus(
+ "Camera could not start automatically.\n\n" +
+ "Error: " +
+ errorName +
+ "\n\n" +
+ errorMessage +
+ "\n\n" +
+ "Please select a camera below.",
+ "error"
+ );
+
+ cameraSelect.style.display = "block";
+
+ retryButton.style.display = "inline-block";
+
+ } else {
+
+ setStatus(
+ "Camera could not start.\n\n" +
+ "Error: " +
+ errorName +
+ "\n\n" +
+ errorMessage,
+ "error"
+ );
+
+ retryButton.style.display = "inline-block";
+
+ }
+
+ }
+
+ }
+
+
+ cameraSelect.addEventListener(
+ "change",
+ async function() {
+
+ const cameraId =
+ cameraSelect.value;
+
+ if (!cameraId) {
+ return;
+ }
+
+ try {
+
+ if (html5QrCode) {
+
+ try {
+ await html5QrCode.stop();
+ } catch (e) {
+ // Ignore if scanner was not running.
+ }
+
+ }
+
+ html5QrCode =
+ new Html5Qrcode("qrReader");
+
+
+ await html5QrCode.start(
+
+ cameraId,
+
+ {
+ fps: 10,
+ qrbox: {
+ width: 250,
+ height: 250
+ }
+ },
+
+ onScanSuccess,
+
+ function(errorMessage) {
+ // Ignore normal scan failures.
+ }
+
+ );
+
+
+ setStatus(
+ "Camera started. Point it at the customer's QR code.",
+ "success"
+ );
+
+ } catch (error) {
+
+ console.error(
+ "Selected camera error:",
+ error
+ );
+
+ setStatus(
+ "Selected camera could not start.\n\n" +
+ "Error: " +
+ (error.name || "UnknownError") +
+ "\n\n" +
+ (error.message || String(error)),
+ "error"
+ );
+
+ }
+
+ }
+ );
+
+
+ function onScanSuccess(decodedText) {
+
+ if (scanHandled) {
+ return;
+ }
+
+ scanHandled = true;
+
+
+ if (html5QrCode) {
+
+ html5QrCode
+ .stop()
+ .catch(function() {});
+
+ }
+
+
+ setStatus(
+ "QR scanned successfully. Returning to Staff page...",
+ "success"
+ );
+
+
+ /*
+ * Send ONLY the decoded QR text
+ * back to the Staff page.
+ */
+
+ if (window.opener) {
+
+ window.opener.postMessage(
+ decodedText,
+ "*"
+ );
+
+ }
+
+
+ setTimeout(function() {
+
+ try {
+ window.close();
+ } catch (e) {}
+
+ }, 500);
+
+ }
+
+
+ function cancelScan() {
+
+ if (html5QrCode) {
+
+ html5QrCode
+ .stop()
+ .catch(function() {});
+
+ }
+
+ window.close();
+
+ }
+
+
+ /*
+ * Run diagnostics immediately.
+ */
+
+ updateDiagnostics();
+
+
+ /*
+ * Start camera automatically.
+ */
+
+ startCamera();
+
+ </script>
+
+</body>
 </html>
