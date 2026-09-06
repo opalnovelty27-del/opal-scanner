@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Opal Rewards — Scan Customer QR</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #111; color: #fff; margin: 0; padding: 20px;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        min-height: 100vh; text-align: center;
+      }
+      h1 { font-size: 16px; font-weight: 600; margin: 0 0 16px; color: #ddd; }
+      #qrReader { width: 100%; max-width: 320px; }
+      .message { margin-top: 16px; font-size: 14px; color: #ddd; max-width: 320px; }
+      .error { color: #ff8a80; }
+      button {
+        margin-top: 20px; padding: 14px 28px; background: #9c7c3c; color: #fff;
+        border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Opal Rewards — Scan Customer QR</h1>
+    <div id="qrReader"></div>
+    <div class="message" id="statusMessage">Starting camera…</div>
+    <button onclick="cancelScan()">CANCEL</button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/1.1.5/html5-qrcode.min.js"></script>
+    <script>
+      let html5QrCode = null;
+      let scanHandled = false;
+
+      function setStatus(msg, isError) {
+        const el = document.getElementById('statusMessage');
+        el.textContent = msg;
+        el.className = 'message' + (isError ? ' error' : '');
+      }
+
+      function startScan() {
+        html5QrCode = new Html5Qrcode("qrReader");
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: 220 },
+          onScanSuccess,
+          function() { /* fires continuously while nothing is found — ignored */ }
+        ).then(function() {
+          setStatus("Point the camera at the customer's QR code.");
+        }).catch(function() {
+          setStatus('Camera unavailable. Please close this window and use mobile number or customer token search on the Staff page instead.', true);
+        });
+      }
+
+      function onScanSuccess(decodedText) {
+        if (scanHandled) return;
+        scanHandled = true;
+
+        if (html5QrCode) { html5QrCode.stop().catch(function() {}); }
+        setStatus('Scanned! Returning to Staff page…');
+
+        if (window.opener) {
+          // Can't lock the target origin — Apps Script's sandboxed page has an
+          // opaque origin the scanner can't predict. Safe because: the decoded
+          // text isn't sensitive (it's the same content printed on the
+          // customer's own QR), and the Staff page independently verifies the
+          // SENDER's origin before trusting anything it receives.
+          window.opener.postMessage(decodedText, '*');
+        }
+
+        setTimeout(function() {
+          window.close();
+          setStatus('Done! You can close this window if it did not close automatically.');
+        }, 300);
+      }
+
+      function cancelScan() {
+        if (html5QrCode) { html5QrCode.stop().catch(function() {}); }
+        window.close();
+      }
+
+      startScan();
+    </script>
+  </body>
+</html>
